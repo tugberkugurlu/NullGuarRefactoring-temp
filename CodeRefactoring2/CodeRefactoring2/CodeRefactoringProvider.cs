@@ -41,6 +41,19 @@ namespace CodeRefactoring2
 
                         if (type.IsReferenceType)
                         {
+                            // TODO: check if the null guard already exists.
+                            // TODO: if not, instert provide code action to instert the guard.
+                            // TODO: when inserting the guard, make sure it stays in order.
+
+                            BlockSyntax blockSyntax = methodDeclaration.Body;
+                            IEnumerable<IfStatementSyntax> ifStatements = blockSyntax.ChildNodes().OfType<IfStatementSyntax>();
+                            if (ifStatements.Any())
+                            {
+                                foreach (IfStatementSyntax ifStatement in ifStatements)
+                                {
+                                }
+                                // check if there is any if statement for null guard for this param.
+                            }
                         }
                     }
                 }
