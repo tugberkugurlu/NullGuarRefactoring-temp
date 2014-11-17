@@ -90,7 +90,7 @@ namespace CodeRefactoring2
 
                             if (isGuardAlreadyExists == false)
                             {
-                                CodeAction action = CodeAction.Create("Reverse type name",
+                                CodeAction action = CodeAction.Create("Check paramater for null",
                                     c => AddGuardAsync(context.Document, parameter, methodDeclaration, c));
 
                                 context.RegisterRefactoring(action);
@@ -111,21 +111,36 @@ namespace CodeRefactoring2
                 "nameof",
                 SyntaxFactory.ParseTypeName(parameter.Identifier.Text));
 
-            SeparatedSyntaxList<ArgumentSyntax> argsList = new SeparatedSyntaxList<ArgumentSyntax>();
-            argsList.Add(SyntaxFactory.Argument(nameOfExp));
+            SeparatedSyntaxList<ArgumentSyntax> argsList = new SeparatedSyntaxList<ArgumentSyntax>()
+                    .Add(SyntaxFactory.Argument(nameOfExp));
 
             ObjectCreationExpressionSyntax objectCreationEx = SyntaxFactory.ObjectCreationExpression(
-                SyntaxFactory.ParseTypeName(nameof(ArgumentNullException)), 
+                SyntaxFactory.ParseTypeName(nameof(ArgumentNullException)),
                 SyntaxFactory.ArgumentList(argsList),
                 null);
 
             ThrowStatementSyntax throwStatement = SyntaxFactory.ThrowStatement(objectCreationEx);
+
+            BlockSyntax syntaxBlock = SyntaxFactory.Block(
+                SyntaxFactory.Token(SyntaxKind.OpenBraceToken),
+                new SyntaxList<StatementSyntax>().Add(throwStatement),
+                SyntaxFactory.Token(SyntaxKind.CloseBraceToken)).WithAdditionalAnnotations(Formatter.Annotation);
+
+            //SyntaxNodeOrTokenList syntaxList = new SyntaxNodeOrTokenList()
+            //    .Add(SyntaxFactory.Token(SyntaxKind.IfKeyword))
+            //    .Add(SyntaxFactory.Token(SyntaxKind.OpenParenToken))
+            //    .Add(binaryExpression)
+            //    .Add(SyntaxFactory.Token(SyntaxKind.CloseParenToken))
+            //    .Add(syntaxBlock);
+
             IfStatementSyntax ifStatement = SyntaxFactory
-                .IfStatement(SyntaxFactory.Token(SyntaxKind.IfKeyword), SyntaxFactory.Token(SyntaxKind.OpenParenToken), binaryExpression, SyntaxFactory.Token(SyntaxKind.CloseParenToken), throwStatement, null)
+                .IfStatement(SyntaxFactory.Token(SyntaxKind.IfKeyword),
+                    SyntaxFactory.Token(SyntaxKind.OpenParenToken),
+                    binaryExpression, SyntaxFactory.Token(SyntaxKind.CloseParenToken), syntaxBlock, null)
                 .WithAdditionalAnnotations(Formatter.Annotation);
 
             SyntaxNode root = await document.GetSyntaxRootAsync(cancellationToken);
-            SyntaxNode newRoot = root.InsertNodesBefore(methodDeclaration.Body.ChildNodes().First(), new[] { ifStatement });
+            SyntaxNode newRoot = root.InsertNodesBefore(methodDeclaration.Body.ChildNodes().First(), new SyntaxNode[] { ifStatement });
 
             return document.WithSyntaxRoot(newRoot);
         }
