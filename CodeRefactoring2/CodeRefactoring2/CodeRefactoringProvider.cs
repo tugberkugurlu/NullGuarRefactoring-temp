@@ -10,6 +10,8 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Rename;
 using Microsoft.CodeAnalysis.Text;
+using System;
+using Microsoft.CodeAnalysis.Formatting;
 
 namespace CodeRefactoring2
 {
@@ -29,10 +31,13 @@ namespace CodeRefactoring2
 
             // this covers both methods and ctors
             BaseMethodDeclarationSyntax methodDeclaration = node as BaseMethodDeclarationSyntax;
-            if(methodDeclaration != null)
+            if (methodDeclaration != null)
             {
                 if (methodDeclaration.ParameterList.Parameters.Any())
                 {
+                    BlockSyntax blockSyntax = methodDeclaration.Body;
+                    IEnumerable<IfStatementSyntax> ifStatements = blockSyntax.ChildNodes().OfType<IfStatementSyntax>();
+
                     foreach (ParameterSyntax parameter in methodDeclaration.ParameterList.Parameters)
                     {
                         TypeSyntax paramTypeName = parameter.Type;
@@ -41,23 +46,88 @@ namespace CodeRefactoring2
 
                         if (type.IsReferenceType)
                         {
-                            // TODO: check if the null guard already exists.
-                            // TODO: if not, instert provide code action to instert the guard.
-                            // TODO: when inserting the guard, make sure it stays in order.
-
-                            BlockSyntax blockSyntax = methodDeclaration.Body;
-                            IEnumerable<IfStatementSyntax> ifStatements = blockSyntax.ChildNodes().OfType<IfStatementSyntax>();
-                            if (ifStatements.Any())
+                            // check if the null guard already exists.
+                            bool isGuardAlreadyExists = ifStatements.Any(ifStatement =>
                             {
-                                foreach (IfStatementSyntax ifStatement in ifStatements)
-                                {
-                                }
-                                // check if there is any if statement for null guard for this param.
+                                return ifStatement.ChildNodes()
+                                    .OfType<BinaryExpressionSyntax>()
+                                    .Where(x => x.IsKind(SyntaxKind.EqualsExpression))
+                                    .Any(expression =>
+                                    {
+                                        bool result;
+                                        bool isNullCheck = expression.Right.IsKind(SyntaxKind.NullLiteralExpression);
+                                        if (isNullCheck)
+                                        {
+                                            IdentifierNameSyntax identifierSyntaxt = expression.ChildNodes().OfType<IdentifierNameSyntax>().FirstOrDefault();
+                                            if (identifierSyntaxt != null)
+                                            {
+                                                string identifierText = identifierSyntaxt.Identifier.Text;
+                                                string paramText = parameter.Identifier.Text;
+
+                                                if (identifierText.Equals(paramText, StringComparison.Ordinal))
+                                                {
+                                                    // There is already a null guard for this parameter.
+                                                    result = true;
+                                                }
+                                                else
+                                                {
+                                                    result = false;
+                                                }
+                                            }
+                                            else
+                                            {
+                                                result = false;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            result = false;
+                                        }
+
+                                        return result;
+                                    });
+                            });
+
+                            if (isGuardAlreadyExists == false)
+                            {
+                                CodeAction action = CodeAction.Create("Reverse type name",
+                                    c => AddGuardAsync(context.Document, parameter, methodDeclaration, c));
+
+                                context.RegisterRefactoring(action);
                             }
                         }
                     }
                 }
             }
+        }
+
+        private async Task<Document> AddGuardAsync(Document document, ParameterSyntax parameter, BaseMethodDeclarationSyntax methodDeclaration, CancellationToken cancellationToken)
+        {
+            BinaryExpressionSyntax binaryExpression = SyntaxFactory.BinaryExpression(SyntaxKind.EqualsExpression,
+                SyntaxFactory.IdentifierName(parameter.Identifier),
+                SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression));
+
+            NameOfExpressionSyntax nameOfExp = SyntaxFactory.NameOfExpression(
+                "nameof",
+                SyntaxFactory.ParseTypeName(parameter.Identifier.Text));
+
+            SeparatedSyntaxList<ArgumentSyntax> argsList = new SeparatedSyntaxList<ArgumentSyntax>();
+            argsList.Add(SyntaxFactory.Argument(nameOfExp));
+
+            ObjectCreationExpressionSyntax objectCreationEx = SyntaxFactory.ObjectCreationExpression(
+                SyntaxFactory.ParseTypeName(nameof(ArgumentNullException)), 
+                SyntaxFactory.ArgumentList(argsList),
+                null);
+
+            ThrowStatementSyntax throwStatement = SyntaxFactory.ThrowStatement(objectCreationEx);
+            IfStatementSyntax ifStatement = SyntaxFactory
+                .IfStatement(SyntaxFactory.Token(SyntaxKind.IfKeyword), SyntaxFactory.Token(SyntaxKind.OpenParenToken), binaryExpression, SyntaxFactory.Token(SyntaxKind.CloseParenToken), throwStatement, null)
+                .WithAdditionalAnnotations(Formatter.Annotation);
+
+            SyntaxNode root = await document.GetSyntaxRootAsync(cancellationToken);
+            SyntaxNode newRoot = root.InsertNodesBefore(methodDeclaration.Body.ChildNodes().First(), new[] { ifStatement });
+
+            return document.WithSyntaxRoot(newRoot);
         }
     }
 }
